@@ -12,26 +12,13 @@ namespace PhoneChecker
         private const int RequiredParameterCount = 1;
         private const string UsageString = "PhoneChecked <path> [startDate]";
 
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
-            if (args.Length < RequiredParameterCount)
-            {
-                Console.WriteLine("At least 1 parameter is required.");
-                Console.WriteLine(UsageString);
-                return;
-            }
-
-            var fileFolder = args[0];
-            DateTime? startDate = null;
-
-            if (args.Length == 2)
-            {
-                startDate = DateTime.Parse(args[1]);
-            }
+            if (ReadParameters(args, out string fileFolder, out DateTime? startDate)) return;
 
             var files = Directory.GetFiles(fileFolder);
 
-            var numbers = ReadNumbers();
+            var numbers = ReadPhoneNumberDictionary();
 
             foreach (var filename in files)
             {
@@ -39,50 +26,11 @@ namespace PhoneChecker
                 {
                     Console.WriteLine("Checking Numbers in " + filename);
 
-                    var headerRow = new List<string>();
-                    var dataRow = new List<List<string>>();
                     var method = filename.Contains("voice") ? "called" : "texted";
 
-                    while (!inputFile.EndOfStream)
-                    {
-                        var buffer = inputFile.ReadLine();
-                        if (buffer != null && (buffer.StartsWith("Usage") || buffer.StartsWith("\"") ||
-                                               buffer.StartsWith("Total") ||
-                                               string.IsNullOrWhiteSpace(buffer))) continue;
+                    ReadFile(inputFile, out List<string> headerRow, out List<List<string>> dataRow);
 
-                        if (buffer != null && buffer.StartsWith("Date"))
-                        {
-                            headerRow = buffer.Split(',').ToList();
-                            continue;
-                        }
-
-                        if (buffer == null) continue;
-
-                        var line = buffer.Split(',').ToList();
-                        if (line.Count > 7)
-                        {
-                            // Combine City & State 
-                            line[2] = line[2].TrimStart('"') + ", " + line[3].TrimEnd('"');
-                            line.RemoveAt(3);
-                        }
-                        dataRow.Add(line);
-                    }
-
-                    foreach (var row in dataRow)
-                    {
-                        var dateColumn = headerRow.FindIndex(r => r.Contains("Date"));
-                        var numberColumn = headerRow.FindIndex(r => r.Contains("Number"));
-
-                        foreach (var number in numbers)
-                        {
-                            if (row[numberColumn].Contains(number.Value) &&
-                                (startDate == null || DateTime.Parse(row[dateColumn]) >= startDate))
-                            {
-                                Console.WriteLine("On " + row[dateColumn] + " " + row[numberColumn] + " (" +
-                                                  number.Key + ") was " + method);
-                            }
-                        }
-                    }
+                    AnalyzeData(dataRow, headerRow, numbers, startDate, method);
                 }
             }
             Console.WriteLine("Done checking");
@@ -90,7 +38,104 @@ namespace PhoneChecker
             Console.ReadLine();
         }
 
-        private static Dictionary<string, string> ReadNumbers()
+        /// <summary>
+        /// Analyses the data in all the dataRows and writes a message if a phone number from the dictionary of phoneNumberDictionary
+        /// is found after the start date
+        /// </summary>
+        /// <param name="dataRows">DataRows to analyze</param>
+        /// <param name="headerRow">HeaderRow with column names</param>
+        /// <param name="phoneNumberDictionary">Dictionary of phonenumbers to search for</param>
+        /// <param name="startDate">StartDate to look for</param>
+        /// <param name="method">Method of communication (called/texted)</param>
+        private static void AnalyzeData(IEnumerable<List<string>> dataRows, List<string> headerRow, Dictionary<string, string> phoneNumberDictionary, DateTime? startDate, string method)
+        {
+            foreach (var row in dataRows)
+            {
+                var dateColumn = headerRow.FindIndex(r => r.Contains("Date"));
+                var numberColumn = headerRow.FindIndex(r => r.Contains("Number"));
+
+                foreach (var number in phoneNumberDictionary)
+                {
+                    if (row[numberColumn].Contains(number.Value) &&
+                        (startDate == null || DateTime.Parse(row[dateColumn]) >= startDate))
+                    {
+                        Console.WriteLine("On " + row[dateColumn] + " " + row[numberColumn] + " (" +
+                                          number.Key + ") was " + method);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Read the contents of a file into a header row and a list of datarows
+        /// </summary>
+        /// <param name="inputFile">Input file to read</param>
+        /// <param name="headerRow">List of headers</param>
+        /// <param name="dataRow">List of datarows, each consisting of a List of strings</param>
+        private static void ReadFile(StreamReader inputFile, out List<string> headerRow, out List<List<string>> dataRow)
+        {
+            headerRow = new List<string>();
+            dataRow = new List<List<string>>();
+
+            while (!inputFile.EndOfStream)
+            {
+                var buffer = inputFile.ReadLine();
+                if (buffer != null && (buffer.StartsWith("Usage") || buffer.StartsWith("\"") ||
+                                       buffer.StartsWith("Total") ||
+                                       string.IsNullOrWhiteSpace(buffer))) continue;
+
+                if (buffer != null && buffer.StartsWith("Date"))
+                {
+                    headerRow = buffer.Split(',').ToList();
+                    continue;
+                }
+
+                if (buffer == null) continue;
+
+                var line = buffer.Split(',').ToList();
+                if (line.Count > 7)
+                {
+                    // Combine City & State 
+                    line[2] = line[2].TrimStart('"') + ", " + line[3].TrimEnd('"');
+                    line.RemoveAt(3);
+                }
+                dataRow.Add(line);
+            }
+        }
+
+        /// <summary>
+        /// Read the parameters passed into the program
+        /// </summary>
+        /// <param name="args">Parameters to deal with</param>
+        /// <param name="fileFolder">File folder location</param>
+        /// <param name="startDate">Start Date</param>
+        /// <returns></returns>
+        private static bool ReadParameters(string[] args, out string fileFolder, out DateTime? startDate)
+        {
+            if (args.Length < RequiredParameterCount)
+            {
+                Console.WriteLine("At least 1 parameter is required.");
+                Console.WriteLine(UsageString);
+                fileFolder = "";
+                startDate = null;
+                return true;
+            }
+
+            fileFolder = args[0];
+            startDate = null;
+
+            if (args.Length == 2)
+            {
+                startDate = DateTime.Parse(args[1]);
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Read in the Dictionary of phone numbers from the configuration file
+        /// </summary>
+        /// <returns>Dictionary of names and phonenumbers from the configuration file.</returns>
+        private static Dictionary<string, string> ReadPhoneNumberDictionary()
         {
             Dictionary<string, string> numbers;
 
